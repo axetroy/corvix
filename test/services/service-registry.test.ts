@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   CorvixApplication,
   DuplicateRegistrationError,
-  ServiceNotFoundError,
 } from '../../src/index.js';
 import type { PluginDefinition } from '../../src/index.js';
 
@@ -47,7 +46,7 @@ describe('typed Service API', () => {
       'consumer',
       (context) => {
         const file = context.services.get('file');
-        read = (path) => file.read(path);
+        read = file.read;
       },
       { 'file-provider': '^1.0.0' },
     ));
@@ -56,6 +55,7 @@ describe('typed Service API', () => {
     await expect(read('/tmp/a')).resolves.toBe('contents:/tmp/a');
     await app.stop();
     expect(app.getPluginState('file-provider')).toBe('inactive');
+    expect(() => read('/tmp/after-stop')).toThrow(/no longer available/);
   });
 
   it('permits optional lookup only through a declared optional dependency', async () => {
@@ -97,7 +97,12 @@ describe('typed Service API', () => {
       context.services.get('file');
     }));
     await expect(missingDependency.start()).rejects.toMatchObject({
-      cause: expect.any(ServiceNotFoundError),
+      cause: expect.objectContaining({
+        cause: expect.objectContaining({
+          serviceName: 'file',
+          pluginId: 'consumer',
+        }),
+      }),
     });
 
     const duplicate = new CorvixApplication<Record<never, never>, Record<never, never>, AppServices>({
@@ -117,7 +122,9 @@ describe('typed Service API', () => {
       });
     }));
     await expect(duplicate.start()).rejects.toMatchObject({
-      cause: expect.any(DuplicateRegistrationError),
+      cause: expect.objectContaining({
+        cause: expect.any(DuplicateRegistrationError),
+      }),
     });
   });
 

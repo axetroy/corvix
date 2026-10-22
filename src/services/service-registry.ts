@@ -86,6 +86,7 @@ export class ServiceRegistry<T> {
       throw new ServiceNotFoundError(
         `Plugin "${pluginId}" cannot access services while ${state ?? 'unregistered'}`,
         name,
+        { pluginId },
       );
     }
     return this.#get(pluginId, manifest, name, optional);
@@ -111,30 +112,83 @@ export class ServiceRegistry<T> {
       throw new ServiceNotFoundError(
         `Service "${name}" is not registered or its provider is inactive`,
         name,
+        { pluginId },
       );
     }
-    if (entry.pluginId === pluginId) {
-      return entry.value;
-    }
-
-    const declaredRange = optional
-      ? manifest.optionalDependencies?.[entry.pluginId]
-      : manifest.dependencies?.[entry.pluginId];
-    if (!declaredRange || !satisfies(entry.version, declaredRange)) {
-      if (optional) {
-        return undefined;
+    if (entry.pluginId !== pluginId) {
+      const declaredRange = optional
+        ? manifest.optionalDependencies?.[entry.pluginId]
+        : manifest.dependencies?.[entry.pluginId];
+      if (!declaredRange || !satisfies(entry.version, declaredRange)) {
+        if (optional) {
+          return undefined;
+        }
+        throw new ServiceNotFoundError(
+          `Plugin "${pluginId}" must declare a compatible required dependency on provider "${entry.pluginId}" to access service "${name}"`,
+          name,
+          { pluginId, providerPluginId: entry.pluginId },
+        );
       }
-      throw new ServiceNotFoundError(
-        `Plugin "${pluginId}" must declare a compatible required dependency on provider "${entry.pluginId}" to access service "${name}"`,
-        name,
-      );
     }
     if (this.#getPluginVersion(entry.pluginId) !== entry.version) {
       throw new ServiceNotFoundError(
         `Service "${name}" provider "${entry.pluginId}" is no longer registered at the expected version`,
         name,
+        { pluginId, providerPluginId: entry.pluginId },
       );
     }
-    return entry.value;
+    return new Proxy(entry.value, {
+      get: (target, property) => {
+        this.#assertAvailable(pluginId, manifest, entry, name, optional);
+        const value = Reflect.get(target, property, target) as unknown;
+        if (typeof value !== 'function') {
+          return value;
+        }
+        return (...args: unknown[]) => {
+          this.#assertAvailable(pluginId, manifest, entry, name, optional);
+          return Reflect.apply(value, target, args);
+        };
+      },
+    });
+  }
+
+  #assertAvailable(
+    pluginId: string,
+    manifest: PluginManifest,
+    entry: ServiceEntry,
+    serviceName: string,
+    optional: boolean,
+  ): void {
+    const ownerState = this.#getPluginState(pluginId);
+    const providerState = this.#getPluginState(entry.pluginId);
+    const ownerIsActive = ownerState === 'active' || ownerState === 'activating';
+    const providerIsActive = entry.pluginId === pluginId
+      ? ownerIsActive
+      : providerState === 'active';
+    if (
+      !ownerIsActive
+      || !providerIsActive
+      || this.#services.get(serviceName) !== entry
+      || this.#getPluginVersion(entry.pluginId) !== entry.version
+    ) {
+      throw new ServiceNotFoundError(
+        `Service "${serviceName}" is no longer available to plugin "${pluginId}"`,
+        serviceName,
+        { pluginId, providerPluginId: entry.pluginId },
+      );
+    }
+    if (entry.pluginId === pluginId) {
+      return;
+    }
+    const declaredRange = optional
+      ? manifest.optionalDependencies?.[entry.pluginId]
+      : manifest.dependencies?.[entry.pluginId];
+    if (!declaredRange || !satisfies(entry.version, declaredRange)) {
+      throw new ServiceNotFoundError(
+        `Plugin "${pluginId}" must declare a compatible dependency on provider "${entry.pluginId}" to access service "${serviceName}"`,
+        serviceName,
+        { pluginId, providerPluginId: entry.pluginId },
+      );
+    }
   }
 }

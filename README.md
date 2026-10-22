@@ -79,6 +79,8 @@ Within `setup(context)`, use `context.hooks.tap(...)`, `context.events.on(...)` 
 
 If startup fails, `app.start()` can be called again to retry the full startup. `app.retryPlugin(id)` retries one failed plugin and its dependencies, then resumes startup; the application enters the running state only if all plugins activate successfully.
 
+Startup failures reject with `ApplicationStartError`, preserving the original failure as `cause` and any rollback failures in `rollbackErrors`. Plugin setup and teardown failures are reported through the injected `Logger` with the plugin ID and lifecycle phase; errors thrown by the logger are contained so they do not hide runtime failures.
+
 See [`design.md`](./design.md) for the architecture, lifecycle guarantees, and implementation phases.
 
 ## Contributing

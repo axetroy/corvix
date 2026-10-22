@@ -1,4 +1,8 @@
-import { PluginRegistrationError } from '../errors.js';
+import {
+  ApplicationStartError,
+  PluginActivationError,
+  PluginRegistrationError,
+} from '../errors.js';
 import { noopLogger } from '../logging/logger.js';
 import { PluginManager } from '../plugin/plugin-manager.js';
 import { EventBus } from '../events/event-bus.js';
@@ -131,7 +135,7 @@ export class CorvixApplication<
         this.#state = 'running';
       } catch (error) {
         this.#state = 'stopped';
-        throw error;
+        throw this.#asStartError(error);
       }
     });
     this.#enqueue(operation);
@@ -195,7 +199,7 @@ export class CorvixApplication<
         this.#state = 'running';
       } catch (error) {
         this.#state = 'stopped';
-        throw error;
+        throw this.#asStartError(error);
       }
     });
     this.#enqueue(operation);
@@ -218,5 +222,15 @@ export class CorvixApplication<
     cleanup: () => void,
   ): void {
     void operation.then(cleanup, cleanup);
+  }
+
+  #asStartError(error: unknown): ApplicationStartError {
+    if (error instanceof ApplicationStartError) {
+      return error;
+    }
+    const rollbackErrors = error instanceof PluginActivationError
+      ? error.cleanupErrors
+      : [];
+    return new ApplicationStartError(error, rollbackErrors);
   }
 }

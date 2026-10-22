@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ApplicationStartError,
   CorvixApplication,
   PluginActivationError,
   PluginDependencyError,
@@ -105,7 +106,15 @@ describe('plugin lifecycle', () => {
     missing.register(createPlugin('consumer', () => {}, {
       dependencies: { absent: '^1.0.0' },
     }));
-    await expect(missing.start()).rejects.toBeInstanceOf(PluginDependencyError);
+    const startupError = await missing.start().then(
+      () => { throw new Error('Expected startup to fail'); },
+      (error: unknown) => error,
+    );
+    expect(startupError).toBeInstanceOf(ApplicationStartError);
+    expect(startupError).toMatchObject({
+      cause: expect.any(PluginDependencyError),
+      rollbackErrors: [],
+    });
     expect(missing.getPluginState('consumer')).toBe('failed');
 
     const incompatible = new CorvixApplication({ apiVersion: '0.1.0' });
@@ -113,7 +122,9 @@ describe('plugin lifecycle', () => {
       dependencies: { provider: '^2.0.0' },
     }));
     incompatible.register(createPlugin('provider', () => {}, { version: '1.0.0' }));
-    await expect(incompatible.start()).rejects.toBeInstanceOf(PluginDependencyError);
+    await expect(incompatible.start()).rejects.toMatchObject({
+      cause: expect.any(PluginDependencyError),
+    });
 
     const cyclic = new CorvixApplication({ apiVersion: '0.1.0' });
     cyclic.register(createPlugin('first', () => {}, {
@@ -122,7 +133,9 @@ describe('plugin lifecycle', () => {
     cyclic.register(createPlugin('second', () => {}, {
       dependencies: { first: '^1.0.0' },
     }));
-    await expect(cyclic.start()).rejects.toThrow(/dependency cycle/i);
+    await expect(cyclic.start()).rejects.toMatchObject({
+      cause: expect.objectContaining({ message: expect.stringMatching(/dependency cycle/i) }),
+    });
   });
 
   it('validates registration metadata and API compatibility', async () => {
@@ -137,7 +150,9 @@ describe('plugin lifecycle', () => {
     app.register(createPlugin('incompatible-api', () => {}, {
       apiVersion: '^1.0.0',
     }));
-    await expect(app.start()).rejects.toBeInstanceOf(PluginDependencyError);
+    await expect(app.start()).rejects.toMatchObject({
+      cause: expect.any(PluginDependencyError),
+    });
   });
 
   it('rolls back failed activation and explicitly retries with a fresh context', async () => {
@@ -164,7 +179,9 @@ describe('plugin lifecycle', () => {
       { dependencies: { provider: '^1.0.0' } },
     ));
 
-    await expect(app.start()).rejects.toBeInstanceOf(PluginActivationError);
+    await expect(app.start()).rejects.toMatchObject({
+      cause: expect.any(PluginActivationError),
+    });
     expect(app.state).toBe('stopped');
     expect(app.getPluginState('provider')).toBe('inactive');
     expect(app.getPluginState('consumer')).toBe('failed');
@@ -204,10 +221,12 @@ describe('plugin lifecycle', () => {
       throw new Error('later startup failure');
     }));
 
-    await expect(app.start()).rejects.toBeInstanceOf(PluginActivationError);
-    await expect(app.retryPlugin('consumer')).rejects.toBeInstanceOf(
-      PluginActivationError,
-    );
+    await expect(app.start()).rejects.toMatchObject({
+      cause: expect.any(PluginActivationError),
+    });
+    await expect(app.retryPlugin('consumer')).rejects.toMatchObject({
+      cause: expect.any(PluginActivationError),
+    });
     expect(app.state).toBe('stopped');
     expect(app.getPluginState('provider')).toBe('inactive');
     expect(app.getPluginState('consumer')).toBe('inactive');
@@ -270,5 +289,91 @@ describe('plugin lifecycle', () => {
     await Promise.all([firstStart, stop]);
     expect(calls).toEqual(['setup', 'deactivate']);
     expect(app.state).toBe('stopped');
+  });
+
+  it('logs plugin errors with context without allowing logger failures to mask them', async () => {
+    const records: { message: string; context: unknown }[] = [];
+    const app = new CorvixApplication({
+      apiVersion: '0.1.0',
+      logger: {
+        debug() {},
+        info() {},
+        warn() {},
+        error(message, context) {
+          records.push({ message, context });
+          if (message === 'Plugin deactivation failed') {
+            throw new Error('logger failed');
+          }
+        },
+      },
+    });
+    app.register(createPlugin(
+      'logged',
+      () => { throw new Error('setup failed'); },
+      { version: '1.0.0' },
+    ));
+
+    await expect(app.start()).rejects.toMatchObject({
+      cause: expect.objectContaining({
+        pluginId: 'logged',
+        cause: expect.objectContaining({ message: 'setup failed' }),
+      }),
+    });
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      message: 'Plugin activation failed',
+      context: { pluginId: 'logged', phase: 'activation' },
+    });
+  });
+
+  it('retains rollback errors alongside the startup failure', async () => {
+    const app = new CorvixApplication({ apiVersion: '0.1.0' });
+    app.register(createPlugin(
+      'provider',
+      () => {},
+      { deactivate: () => { throw new Error('provider cleanup failed'); } },
+    ));
+    app.register(createPlugin('consumer', () => {
+      throw new Error('consumer setup failed');
+    }, { dependencies: { provider: '^1.0.0' } }));
+
+    const startupError = await app.start().then(
+      () => { throw new Error('Expected startup to fail'); },
+      (error: unknown) => error,
+    );
+    expect(startupError).toBeInstanceOf(ApplicationStartError);
+    expect(startupError).toMatchObject({
+      cause: expect.any(PluginActivationError),
+      rollbackErrors: [
+        expect.objectContaining({ pluginId: 'provider' }),
+      ],
+    });
+    expect(app.getPluginState('provider')).toBe('inactive');
+  });
+
+  it('contains logger exceptions during plugin deactivation', async () => {
+    const app = new CorvixApplication({
+      apiVersion: '0.1.0',
+      logger: {
+        debug() {},
+        info() {},
+        warn() {},
+        error() { throw new Error('logger failed'); },
+      },
+    });
+    app.register(createPlugin(
+      'logged-shutdown',
+      () => {},
+      { deactivate: () => { throw new Error('deactivation failed'); } },
+    ));
+
+    await app.start();
+    await expect(app.stop()).rejects.toMatchObject({
+      errors: [expect.objectContaining({
+        pluginId: 'logged-shutdown',
+        errors: [expect.objectContaining({ message: 'deactivation failed' })],
+      })],
+    });
+    expect(app.getPluginState('logged-shutdown')).toBe('inactive');
   });
 });

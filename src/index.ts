@@ -1,6 +1,7 @@
 export { CorvixApplication } from './application/application.js';
 export type { ApplicationState } from './application/application.js';
 export {
+  ApplicationStartError,
   DuplicateRegistrationError,
   EventDispatchError,
   EventRegistrationError,

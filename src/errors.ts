@@ -44,6 +44,15 @@ export class PluginDeactivationError extends CorvixError {
   }
 }
 
+export class ApplicationStartError extends CorvixError {
+  readonly rollbackErrors: readonly unknown[];
+
+  constructor(cause: unknown, rollbackErrors: readonly unknown[] = []) {
+    super('Corvix application failed to start', { cause });
+    this.rollbackErrors = [...rollbackErrors];
+  }
+}
+
 export class HookRegistrationError extends CorvixError {}
 
 export class HookExecutionError extends CorvixError {
@@ -79,10 +88,21 @@ export class ServiceRegistrationError extends CorvixError {}
 
 export class ServiceNotFoundError extends CorvixError {
   readonly serviceName: string;
+  readonly pluginId: string | undefined;
+  readonly providerPluginId: string | undefined;
 
-  constructor(message: string, serviceName: string) {
+  constructor(
+    message: string,
+    serviceName: string,
+    options: {
+      readonly pluginId?: string;
+      readonly providerPluginId?: string;
+    } = {},
+  ) {
     super(message);
     this.serviceName = serviceName;
+    this.pluginId = options.pluginId;
+    this.providerPluginId = options.providerPluginId;
   }
 }
 

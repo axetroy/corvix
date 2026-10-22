@@ -246,7 +246,9 @@ describe('typed Hook API', () => {
     }));
 
     await expect(app.start()).rejects.toMatchObject({
-      cause: expect.any(HookRegistrationError),
+      cause: expect.objectContaining({
+        cause: expect.any(HookRegistrationError),
+      }),
     });
     expect(app.getPluginState('first')).toBe('inactive');
     expect(app.getPluginState('second')).toBe('failed');

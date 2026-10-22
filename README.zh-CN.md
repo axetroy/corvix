@@ -77,6 +77,8 @@ const app = new CorvixApplication<AppEvents, AppHooks, AppServices>({
 
 启动失败后可再次调用 `app.start()` 重试全部插件。`app.retryPlugin(id)` 会重试指定失败插件及其依赖，再继续应用启动；只有全部插件激活成功后，应用才进入运行状态。
 
+启动失败时会抛出 `ApplicationStartError`：原始错误保留在 `cause` 中，回滚错误记录在 `rollbackErrors` 中。插件激活或停用失败时，运行时会通过注入的 `Logger` 记录插件 ID 和生命周期阶段；Logger 自身抛出的错误不会遮蔽运行时错误。
+
 完整架构与生命周期约定参见 [`design.md`](./design.md)。
 
 ## 参与贡献

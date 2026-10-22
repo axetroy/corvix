@@ -1,5 +1,6 @@
 import { satisfies, valid, validRange } from 'semver';
 import {
+  ApplicationStartError,
   PluginActivationError,
   PluginDeactivationError,
   PluginDependencyError,
@@ -167,6 +168,7 @@ export class PluginManager<
     string,
     RegisteredPlugin<TEvents, THooks, TServices>
   >();
+  readonly #activationOrder: string[] = [];
 
   constructor(options: PluginManagerOptions<TEvents, THooks, TServices>) {
     if (typeof options.apiVersion !== 'string' || valid(options.apiVersion) === null) {
@@ -249,15 +251,14 @@ export class PluginManager<
   }
 
   async stop(): Promise<void> {
-    let order: string[];
-    try {
-      order = this.#resolveOrder([...this.#plugins.keys()]);
-    } catch {
-      order = [...this.#plugins.keys()];
-    }
-
     const errors: unknown[] = [];
-    for (const pluginId of order.reverse()) {
+    const activeIds = [
+      ...this.#activationOrder,
+      ...[...this.#plugins.keys()].filter(
+        (pluginId) => !this.#activationOrder.includes(pluginId),
+      ),
+    ];
+    for (const pluginId of activeIds.reverse()) {
       const plugin = this.#plugins.get(pluginId);
       if (!plugin || plugin.state !== 'active') {
         continue;
@@ -289,6 +290,12 @@ export class PluginManager<
           failedPlugin.state = 'failed';
         }
       }
+      if (rollbackExistingOnFailure) {
+        const rollbackErrors = await this.#rollbackActivePlugins();
+        if (rollbackErrors.length > 0) {
+          throw new ApplicationStartError(error, rollbackErrors);
+        }
+      }
       throw error;
     }
 
@@ -303,6 +310,9 @@ export class PluginManager<
         plugin.state = 'resolving';
         await this.#activate(plugin);
         activated.push(plugin);
+        if (!this.#activationOrder.includes(pluginId)) {
+          this.#activationOrder.push(pluginId);
+        }
       }
     } catch (error) {
       const rollbackErrors: unknown[] = [];
@@ -424,11 +434,21 @@ export class PluginManager<
       await plugin.definition.setup(context);
       plugin.state = 'active';
     } catch (cause) {
+      this.#logError('Plugin activation failed', {
+        pluginId: plugin.manifest.id,
+        phase: 'activation',
+        error: cause,
+      });
       let cleanupErrors: readonly unknown[] = [];
       try {
         await disposables.dispose();
       } catch (error) {
         cleanupErrors = getAggregateErrors(error);
+        this.#logError('Plugin activation cleanup failed', {
+          pluginId: plugin.manifest.id,
+          phase: 'activation-cleanup',
+          errors: cleanupErrors,
+        });
       }
       plugin.context = undefined;
       plugin.state = 'failed';
@@ -461,8 +481,41 @@ export class PluginManager<
 
     plugin.context = undefined;
     plugin.state = 'inactive';
+    const activationIndex = this.#activationOrder.lastIndexOf(plugin.manifest.id);
+    if (activationIndex !== -1) {
+      this.#activationOrder.splice(activationIndex, 1);
+    }
     if (errors.length > 0) {
+      this.#logError('Plugin deactivation failed', {
+        pluginId: plugin.manifest.id,
+        phase: 'deactivation',
+        errors,
+      });
       throw new PluginDeactivationError(plugin.manifest.id, errors);
+    }
+  }
+
+  async #rollbackActivePlugins(): Promise<unknown[]> {
+    const errors: unknown[] = [];
+    for (const pluginId of [...this.#activationOrder].reverse()) {
+      const plugin = this.#plugins.get(pluginId);
+      if (!plugin || plugin.state !== 'active') {
+        continue;
+      }
+      try {
+        await this.#deactivate(plugin);
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    return errors;
+  }
+
+  #logError(message: string, context: unknown): void {
+    try {
+      this.#logger.error(message, context);
+    } catch {
+      return;
     }
   }
 }
