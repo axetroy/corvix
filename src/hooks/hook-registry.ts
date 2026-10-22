@@ -1,6 +1,15 @@
 import { HookExecutionError, HookRegistrationError } from '../errors.js';
 import type { DisposableCollection } from '../lifecycle/disposable.js';
 import type { PluginState } from '../plugin/types.js';
+import {
+  AsyncParallelHook,
+  AsyncSeriesBailHook,
+  AsyncSeriesHook,
+  AsyncSeriesWaterfallHook,
+  SyncBailHook,
+  SyncHook,
+  SyncWaterfallHook,
+} from 'tapable';
 import type {
   BailResult,
   HookAPI,
@@ -217,133 +226,144 @@ export class HookRegistry<T> {
       throw new HookRegistrationError(`Hook "${name}" is not declared`);
     }
     const entries = this.#activeEntries(name);
+    const tapOptions = entries.map((entry, stage) => ({
+      entry,
+      options: { name: `${entry.pluginId}#${entry.sequence}`, stage },
+    }));
 
     if (descriptor.mode === 'Sync') {
       if (descriptor.strategy === 'waterfall') {
-        let result = initial;
-        for (const entry of entries) {
-          try {
-            const next = entry.handler(args, result);
-            if (isPromiseLike(next)) {
-              suppressPromiseRejection(next);
-              throw new TypeError('Sync hook handlers must not return a Promise');
+        const hook = new SyncWaterfallHook<[unknown, unknown]>(
+          ['previous', 'args'],
+          name,
+        );
+        for (const { entry, options } of tapOptions) {
+          hook.tap(options, (previous, hookArgs) => {
+            try {
+              const result = entry.handler(hookArgs, previous);
+              if (isPromiseLike(result)) {
+                suppressPromiseRejection(result);
+                throw new TypeError('Sync hook handlers must not return a Promise');
+              }
+              return result;
+            } catch (cause) {
+              throw new HookExecutionError(name, entry.pluginId, cause);
             }
-            result = next;
-          } catch (cause) {
-            throw new HookExecutionError(name, entry.pluginId, cause);
-          }
+          });
         }
-        return result;
+        return hook.call(initial, args);
       }
       if (descriptor.strategy === 'bail') {
-        for (const entry of entries) {
+        const hook = new SyncBailHook<[unknown], BailResult<unknown> | undefined>(
+          ['args'],
+          name,
+        );
+        for (const { entry, options } of tapOptions) {
+          hook.tap(options, (hookArgs) => {
+            try {
+              const result = entry.handler(hookArgs);
+              if (isPromiseLike(result)) {
+                suppressPromiseRejection(result);
+                throw new TypeError('Sync hook handlers must not return a Promise');
+              }
+              if (!this.#isBailResult(result)) {
+                throw new TypeError('Bail hook handlers must return a bail result');
+              }
+              return result.type === 'bail' ? result : undefined;
+            } catch (cause) {
+              throw new HookExecutionError(name, entry.pluginId, cause);
+            }
+          });
+        }
+        return hook.call(args) ?? { type: 'continue' };
+      }
+      const hook = new SyncHook<[unknown]>(['args'], name);
+      for (const { entry, options } of tapOptions) {
+        hook.tap(options, (hookArgs) => {
           try {
-            const result = entry.handler(args);
+            const result = entry.handler(hookArgs);
             if (isPromiseLike(result)) {
               suppressPromiseRejection(result);
               throw new TypeError('Sync hook handlers must not return a Promise');
             }
-            if (!this.#isBailResult(result)) {
-              throw new TypeError('Bail hook handlers must return a bail result');
-            }
-            if (result.type === 'bail') {
-              return result;
-            }
           } catch (cause) {
             throw new HookExecutionError(name, entry.pluginId, cause);
           }
-        }
-        return { type: 'continue' };
+        });
       }
-      for (const entry of entries) {
-        try {
-          const result = entry.handler(args);
-          if (isPromiseLike(result)) {
-            suppressPromiseRejection(result);
-            throw new TypeError('Sync hook handlers must not return a Promise');
-          }
-        } catch (cause) {
-          throw new HookExecutionError(name, entry.pluginId, cause);
-        }
-      }
+      hook.call(args);
       return undefined;
     }
 
     if (descriptor.mode === 'AsyncParallel') {
-      return this.#runParallel(name, args, entries);
+      const hook = new AsyncParallelHook<[unknown]>(['args'], name);
+      const errors: (HookExecutionError | undefined)[] = [];
+      for (const [stage, { entry, options }] of tapOptions.entries()) {
+        hook.tapPromise(options, async (hookArgs) => {
+          try {
+            await entry.handler(hookArgs);
+          } catch (cause) {
+            errors[stage] = new HookExecutionError(name, entry.pluginId, cause);
+          }
+        });
+      }
+      return hook.promise(args).then(() => {
+        const failures = errors.filter(
+          (error): error is HookExecutionError => error !== undefined,
+        );
+        if (failures.length > 0) {
+          throw new AggregateError(failures, `Parallel hook "${name}" failed`);
+        }
+      });
     }
-    return this.#runSeries(name, args, initial, entries, descriptor.strategy);
-  }
 
-  async #runParallel(
-    name: string,
-    args: unknown,
-    entries: readonly HookEntry[],
-  ): Promise<void> {
-    const results = await Promise.allSettled(
-      entries.map(async (entry) => {
+    if (descriptor.strategy === 'waterfall') {
+      const hook = new AsyncSeriesWaterfallHook<[unknown, unknown]>(
+        ['previous', 'args'],
+        name,
+      );
+      for (const { entry, options } of tapOptions) {
+        hook.tapPromise(options, async (previous, hookArgs) => {
+          try {
+            return await entry.handler(hookArgs, previous);
+          } catch (cause) {
+            throw new HookExecutionError(name, entry.pluginId, cause);
+          }
+        });
+      }
+      return hook.promise(initial, args);
+    }
+    if (descriptor.strategy === 'bail') {
+      const hook = new AsyncSeriesBailHook<
+        [unknown],
+        BailResult<unknown> | undefined
+      >(['args'], name);
+      for (const { entry, options } of tapOptions) {
+        hook.tapPromise(options, async (hookArgs) => {
+          try {
+            const result = await entry.handler(hookArgs);
+            if (!this.#isBailResult(result)) {
+              throw new TypeError('Bail hook handlers must return a bail result');
+            }
+            return result.type === 'bail' ? result : undefined;
+          } catch (cause) {
+            throw new HookExecutionError(name, entry.pluginId, cause);
+          }
+        });
+      }
+      return hook.promise(args).then((result) => result ?? { type: 'continue' });
+    }
+    const hook = new AsyncSeriesHook<[unknown]>(['args'], name);
+    for (const { entry, options } of tapOptions) {
+      hook.tapPromise(options, async (hookArgs) => {
         try {
-          await entry.handler(args);
+          await entry.handler(hookArgs);
         } catch (cause) {
           throw new HookExecutionError(name, entry.pluginId, cause);
         }
-      }),
-    );
-    const errors = results.flatMap((result) =>
-      result.status === 'rejected' ? [result.reason] : [],
-    );
-    if (errors.length > 0) {
-      throw new AggregateError(errors, `Parallel hook "${name}" failed`);
+      });
     }
-  }
-
-  async #runSeries(
-    name: string,
-    args: unknown,
-    initial: unknown,
-    entries: readonly HookEntry[],
-    strategy: HookDescriptor['strategy'],
-  ): Promise<unknown> {
-    if (strategy === 'waterfall') {
-      let result = initial;
-      for (const entry of entries) {
-        try {
-          result = await entry.handler(args, result);
-        } catch (cause) {
-          throw new HookExecutionError(name, entry.pluginId, cause);
-        }
-      }
-      return result;
-    }
-    if (strategy === 'bail') {
-      for (const entry of entries) {
-        let result: unknown;
-        try {
-          result = await entry.handler(args);
-        } catch (cause) {
-          throw new HookExecutionError(name, entry.pluginId, cause);
-        }
-        if (!this.#isBailResult(result)) {
-          throw new HookExecutionError(
-            name,
-            entry.pluginId,
-            new TypeError('Bail hook handlers must return a bail result'),
-          );
-        }
-        if (result.type === 'bail') {
-          return result;
-        }
-      }
-      return { type: 'continue' };
-    }
-    for (const entry of entries) {
-      try {
-        await entry.handler(args);
-      } catch (cause) {
-        throw new HookExecutionError(name, entry.pluginId, cause);
-      }
-    }
-    return undefined;
+    return hook.promise(args);
   }
 
   #isBailResult(value: unknown): value is BailResult<unknown> {

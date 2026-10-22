@@ -6,6 +6,8 @@
 
 创建应用时可传入 SemVer 格式的 `apiVersion`、可选 Hook 运行时配置、Logger 和宿主运行时选项。泛型参数依次为事件契约、Hook 契约、Service 契约、宿主能力和运行时配置。
 
+Corvix 内部使用 Tapable 执行 Hook 和事件派发。Tapable 类及其 tap 注册属于实现细节；插件仍使用 Corvix 类型化 API 和受生命周期管理的注册方式。
+
 - `register(plugin)` 在应用停止时注册插件。
 - `start()` 按依赖顺序激活插件。应用运行时重复调用不会重复启动；启动失败会回滚已激活插件并抛出 `ApplicationStartError`。
 - `stop()` 按激活顺序逆序停用插件并清理资源。

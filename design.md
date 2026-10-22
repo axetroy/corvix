@@ -287,6 +287,8 @@ Hook Registry 是 Corvix 的核心流程扩展引擎。
 
 Hook 的注册名和参数结构应来自公共契约，而不是由插件任意创建后再通过类型断言使用。
 
+实现使用 `tapable` 的 Hook 类作为执行引擎，不将 Tapable 类型暴露为 Corvix 公共 API。注册表继续负责契约校验、插件所有权、优先级/依赖排序、错误上下文和生命周期清理；每次触发时按已验证的顺序创建 Tapable Hook 并注册当前有效的 Handler，以避免 Tapable 不支持单独移除 tap 而导致已停用插件的回调被长期保留。
+
 ### 4.4 Event Bus
 
 Event Bus 提供类型安全的发布与订阅机制。
@@ -299,6 +301,8 @@ Event Bus 提供类型安全的发布与订阅机制。
 - 定义事件派发顺序。
 - 处理监听器异常。
 - 在插件停用时移除其监听器。
+
+事件派发通过 Tapable `SyncHook` 执行。Corvix 在 Hook 回调边界保留同步监听器约束、逐监听器异常隔离与聚合错误行为；事件监听器仍由 Corvix 注册表和插件 Disposable 管理。
 
 事件应表达已经发生的事实，例如：
 
@@ -473,6 +477,8 @@ Corvix 第一版支持以下执行模式：
 | AsyncSeries | 按顺序等待每个 Handler 完成 | 有顺序依赖的异步处理 |
 | AsyncParallel | 并发执行相互独立的 Handler | 不依赖彼此结果的任务 |
 
+Tapable 执行器映射如下：`Sync` + `series` 使用 `SyncHook`，`Sync` + `waterfall` 使用 `SyncWaterfallHook`，`Sync` + `bail` 使用 `SyncBailHook`；`AsyncSeries` 分别使用 `AsyncSeriesHook`、`AsyncSeriesWaterfallHook` 和 `AsyncSeriesBailHook`；`AsyncParallel` + `series` 使用 `AsyncParallelHook`。Corvix 的 Bail 判别联合由适配层转换为 Tapable 的 `undefined` 继续语义，保证 `{ type: "continue" }` 不会意外触发短路。
+
 执行模式与结果策略是两个维度。第一版支持 `Series`（每个 Handler 接收相同输入，返回值被忽略，Hook 返回 `void`）及串行模式下的 `Waterfall`（每个 Handler 接收前一个结果，Hook 返回最终结果）和 `Bail`（遇到显式短路结果即停止）。`Bail` Handler 和调用结果均使用 `{ type: "continue" } | { type: "bail"; value: T }` 这样的判别联合，因此没有 Handler 短路时也有明确结果，普通的 `undefined` 不会与短路混淆。每个 Hook 只能选择一种结果策略，`Waterfall` 与 `Bail` 不可组合。`AsyncParallel` 只支持相互独立的 `Series` Handler；所有 Handler 接收相同输入，返回值被忽略。Sync 模式只允许同步 Handler，运行时检测并拒绝返回 Promise 的 Handler；异步模式允许同步或异步 Handler。
 
 Hook 契约必须明确参数、结果策略和执行模式，不能在调用时由插件自行改变。`Bail` Handler 必须返回判别联合中的一种结果；不得通过普通返回值或异常隐式表示短路。
@@ -512,7 +518,7 @@ interface AppHooks {
 - 可选的 `before` 和 `after` 约束。
 - 明确的循环依赖检测。
 
-只有在确有需要时才引入复杂排序规则。
+Corvix 先用注册表检查 `before` / `after` 约束的循环并计算确定顺序，再将顺序映射为 Tapable taps 的 `stage`。优先级和稳定注册顺序由该排序决定；Tapable 负责最终调度。
 
 若 `before`、`after` 形成循环，应在启动或注册阶段报告清晰错误，而不是在运行时产生不确定的执行顺序。
 
@@ -525,7 +531,7 @@ Hook 错误策略按执行模式定义：
 - Waterfall：只在串行模式下可用；失败时不再传递后续结果。
 - Bail：只在串行模式下可用；专用短路结果是正常结束，不视为错误。
 
-第一版不提供 Hook 取消机制。不得用一个模糊的 `any` 返回值统一所有模式；输入和返回类型应由执行模式与结果策略共同决定。
+第一版不提供 Hook 取消机制。并行适配器会等待所有 Tapable Promise tap 完成，并在完成后聚合错误。不得用一个模糊的 `any` 返回值统一所有模式；输入和返回类型应由执行模式与结果策略共同决定。
 
 ---
 

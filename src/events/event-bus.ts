@@ -3,6 +3,7 @@ import {
   EventDispatchError,
   EventRegistrationError,
 } from '../errors.js';
+import { SyncHook } from 'tapable';
 import type { DisposableCollection } from '../lifecycle/disposable.js';
 import type { PluginState } from '../plugin/types.js';
 import type { EventAPI } from './types.js';
@@ -118,20 +119,24 @@ export class EventBus<T> {
 
   #emit(name: string, payload: unknown): void {
     const errors: { pluginId: string; error: unknown }[] = [];
-    for (const entry of [...(this.#listeners.get(name) ?? [])]) {
-      if (this.#getPluginState(entry.pluginId) !== 'active') {
-        continue;
-      }
-      try {
-        const result = entry.listener(payload);
-        if (isPromiseLike(result)) {
-          void Promise.resolve(result).catch(() => {});
-          throw new TypeError('Event listeners must be synchronous');
+    const hook = new SyncHook<[unknown]>(['payload'], `event:${name}`);
+    for (const [index, entry] of [...(this.#listeners.get(name) ?? [])].entries()) {
+      hook.tap({ name: `${entry.pluginId}#${index}` }, (eventPayload) => {
+        if (this.#getPluginState(entry.pluginId) !== 'active') {
+          return;
         }
-      } catch (error) {
-        errors.push({ pluginId: entry.pluginId, error });
-      }
+        try {
+          const result = entry.listener(eventPayload);
+          if (isPromiseLike(result)) {
+            void Promise.resolve(result).catch(() => {});
+            throw new TypeError('Event listeners must be synchronous');
+          }
+        } catch (error) {
+          errors.push({ pluginId: entry.pluginId, error });
+        }
+      });
     }
+    hook.call(payload);
 
     if (errors.length > 0) {
       throw new EventDispatchError(name, errors);

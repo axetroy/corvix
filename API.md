@@ -6,6 +6,8 @@ The package root (`corvix`) is the supported public entry point. Internal `src/`
 
 Create an application with a SemVer `apiVersion`, optional Hook runtime configuration, logger, and host runtime options. The generic parameters are event contracts, Hook contracts, service contracts, host capabilities, and runtime configuration, in that order.
 
+Corvix uses Tapable internally for Hook and event dispatch. Tapable classes and tap registration are implementation details; plugins use the Corvix typed APIs and lifecycle-managed registration.
+
 - `register(plugin)` registers a plugin while the application is stopped.
 - `start()` activates plugins in dependency order. Repeated calls while running are no-ops; failed starts reject with `ApplicationStartError` and roll back activated plugins.
 - `stop()` deactivates active plugins in reverse activation order and disposes resources.
