@@ -26,7 +26,7 @@ export type ApplicationState = 'stopped' | 'starting' | 'running' | 'stopping';
 
 function freezeSnapshot<T>(value: T): Readonly<T> {
   if (Array.isArray(value)) {
-    return Object.freeze([...value]) as Readonly<T>;
+    return Object.freeze([...value]) as unknown as Readonly<T>;
   }
   if (typeof value === 'object' && value !== null) {
     return Object.freeze({ ...value }) as Readonly<T>;
@@ -100,7 +100,9 @@ export class CorvixApplication<
       }
     }
     const host: HostRuntime<THostCapabilities, TConfiguration> = Object.freeze({
-      capabilities: freezeSnapshot(options.host?.capabilities ?? {}),
+      capabilities: freezeSnapshot(
+        options.host?.capabilities ?? {} as THostCapabilities,
+      ),
       configuration: freezeSnapshot(configuration),
     });
     const pluginManager = new PluginManager({
