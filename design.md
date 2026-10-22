@@ -369,7 +369,7 @@ interface PluginDefinition {
 
 `setup()` 用于注册资源并完成激活；`deactivate()` 用于执行停用前的业务清理。无论 `deactivate()` 是否存在或是否成功，框架都应继续释放由 `PluginContext` 管理的资源。
 
-`PluginManifest` 描述插件的身份、版本、依赖和能力声明。依赖版本应使用明确的版本范围；具体采用的格式由正式 API 决定。
+`PluginManifest` 描述插件的身份、版本、依赖和能力声明；版本约定见下文。
 
 ```ts
 interface PluginManifest {
@@ -473,9 +473,9 @@ Corvix 第一版支持以下执行模式：
 | AsyncSeries | 按顺序等待每个 Handler 完成 | 有顺序依赖的异步处理 |
 | AsyncParallel | 并发执行相互独立的 Handler | 不依赖彼此结果的任务 |
 
-执行模式与结果策略是两个维度。第一版支持 `Series`（每个 Handler 接收相同输入，返回值被忽略，Hook 返回 `void`）及串行模式下的 `Waterfall`（每个 Handler 接收前一个结果，Hook 返回最终结果）和 `Bail`（遇到显式短路结果即停止，Hook 返回短路值或 `undefined`）。每个 Hook 只能选择一种结果策略，`Waterfall` 与 `Bail` 不可组合。`AsyncParallel` 只支持相互独立的 `Series` Handler；所有 Handler 接收相同输入，返回值被忽略。Sync 模式只允许同步 Handler；异步模式允许同步或异步 Handler。
+执行模式与结果策略是两个维度。第一版支持 `Series`（每个 Handler 接收相同输入，返回值被忽略，Hook 返回 `void`）及串行模式下的 `Waterfall`（每个 Handler 接收前一个结果，Hook 返回最终结果）和 `Bail`（遇到显式短路结果即停止）。`Bail` Handler 和调用结果均使用 `{ type: "continue" } | { type: "bail"; value: T }` 这样的判别联合，因此没有 Handler 短路时也有明确结果，普通的 `undefined` 不会与短路混淆。每个 Hook 只能选择一种结果策略，`Waterfall` 与 `Bail` 不可组合。`AsyncParallel` 只支持相互独立的 `Series` Handler；所有 Handler 接收相同输入，返回值被忽略。Sync 模式只允许同步 Handler，运行时检测并拒绝返回 Promise 的 Handler；异步模式允许同步或异步 Handler。
 
-Hook 契约必须明确参数、结果策略和执行模式，不能在调用时由插件自行改变。`Bail` Handler 返回显式区分的 `continue` 或 `bail(value)` 结果；普通的 `undefined` 仅表示继续，不得同时解释为短路。
+Hook 契约必须明确参数、结果策略和执行模式，不能在调用时由插件自行改变。`Bail` Handler 必须返回判别联合中的一种结果；不得通过普通返回值或异常隐式表示短路。
 
 ### 7.2 Hook 定义
 
@@ -600,7 +600,7 @@ TypeScript 类型只在编译期提供约束，不能验证运行时传入的任
 - 是否允许重复注册。
 - 监听器清理是否幂等。
 
-第一版允许同一回调重复注册，每次注册都拥有独立且幂等的注销函数；插件停用时注销其全部注册。只支持同步监听器，并按注册顺序派发。一个监听器抛出异常时，继续调用其余监听器；全部调用结束后，若出现异常，则由 `emit()` 抛出包含事件名、监听器所属插件及原始错误的 `EventDispatchError`。这表示派发已完成但部分监听器失败，调用方不应因该错误重发事件。第一版不支持异步监听器；未来若支持，应新增独立的异步派发 API。
+第一版允许同一回调重复注册，每次注册都拥有独立且幂等的注销函数；插件停用时注销其全部注册。只支持同步监听器，并按注册顺序派发；运行时检测并拒绝返回 Promise 的监听器。一个监听器抛出异常时，继续调用其余监听器；全部调用结束后，若出现异常，则由 `emit()` 抛出包含事件名、监听器所属插件及原始错误的 `EventDispatchError`。这表示派发已完成但部分监听器失败，调用方不应因该错误重发事件。第一版不支持异步监听器；未来若支持，应新增独立的异步派发 API。
 
 ---
 
@@ -1067,6 +1067,7 @@ Corvix 的第一个可用版本至少应满足以下条件：
 - 可以注册并管理多个插件。
 - 可以声明必需和可选插件依赖，校验 SemVer 范围并检测循环。
 - 可以按依赖顺序激活、逆序停用插件，并在失败后清理和显式重试。
+- 重复或并发的 `start()` / `stop()` 调用具有明确的幂等和串行化行为。
 - 可以执行 Sync、AsyncSeries 和 AsyncParallel Hook，以及串行 Waterfall 和 Bail 结果策略。
 - 可以发布和订阅类型安全的事件。
 - 事件仅同步派发；监听器失败不阻止后续监听器，派发后统一报告错误且不自动重发。
