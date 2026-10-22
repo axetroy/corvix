@@ -3,6 +3,20 @@
   "version": "0.1.0",
   "description": "A type-safe, hook-driven plugin runtime",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/axetroy/corvix.git"
+  },
+  "homepage": "https://github.com/axetroy/corvix#readme",
+  "bugs": {
+    "url": "https://github.com/axetroy/corvix/issues"
+  },
+  "keywords": [
+    "plugin",
+    "runtime",
+    "typescript",
+    "hooks"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -16,14 +30,15 @@
     "dist/",
     "CHANGELOG.md",
     "LICENSE",
-    "README.md"
+    "README.md",
+    "README.zh-CN.md"
   ],
   "engines": {
     "node": ">=18"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "check": "npm run lint && npm run typecheck && npm test && npm run build",
+    "check": "npm run lint && npm run typecheck && npm test && npm run build && npm pack --dry-run",
     "lint": "eslint .",
     "test": "vitest run --coverage",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json"
@@ -34,6 +49,7 @@
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "@types/node": "26.6.5",
+    "@types/semver": "^7.8.0",
     "@vitest/coverage-v8": "4.1.12",
     "eslint": "10.13.0",
     "typescript": "5.9.3",

@@ -2,6 +2,8 @@
 
 Corvix is a platform-independent, type-safe plugin runtime for TypeScript applications. It provides explicit plugin registration, dependency-aware activation, and lifecycle-managed resource cleanup.
 
+[简体中文](./README.zh-CN.md)
+
 The first implementation phase focuses on application and plugin lifecycle foundations. Hooks, events, and services will be added in later phases described in [`design.md`](./design.md).
 
 ## Requirements
@@ -42,6 +44,8 @@ await app.stop();
 ```
 
 Plugins must register every resource with their context so startup rollback and shutdown can release it. Plugin versions and API compatibility use SemVer 2.0 ranges. Plugin IDs are unique; required dependencies activate first, and compatible optional dependencies are ordered before their consumers.
+
+If startup fails, `app.start()` can be called again to retry the full startup. `app.retryPlugin(id)` retries one failed plugin and its dependencies, then resumes startup; the application enters the running state only if all plugins activate successfully.
 
 See [`design.md`](./design.md) for the architecture, lifecycle guarantees, and implementation phases.
 
