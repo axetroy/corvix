@@ -62,7 +62,12 @@ export class ServiceRegistry<T> {
             this.#services.delete(name);
           }
         };
-        disposables.add(dispose);
+        try {
+          disposables.add(dispose);
+        } catch (error) {
+          dispose();
+          throw error;
+        }
         return dispose;
       },
       get: (name) => this.#getForOwner(pluginId, manifest, name, false),

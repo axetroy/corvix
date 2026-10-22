@@ -55,8 +55,16 @@ export class EventBus<T> {
           if (index !== -1) {
             entries.splice(index, 1);
           }
+          if (entries.length === 0 && this.#listeners.get(name) === entries) {
+            this.#listeners.delete(name);
+          }
         };
-        disposables.add(dispose);
+        try {
+          disposables.add(dispose);
+        } catch (error) {
+          dispose();
+          throw error;
+        }
         return dispose;
       },
       emit: (name, payload) => {
@@ -66,12 +74,16 @@ export class EventBus<T> {
             `Plugin "${pluginId}" cannot emit events while ${state ?? 'unregistered'}`,
           );
         }
-        this.#emit(pluginId, name, payload);
+        this.#emit(name, payload);
       },
     } as EventAPI<T>;
   }
 
-  #emit(pluginId: string, name: string, payload: unknown): void {
+  emitFromHost(name: string, payload: unknown): void {
+    this.#emit(name, payload);
+  }
+
+  #emit(name: string, payload: unknown): void {
     const errors: { pluginId: string; error: unknown }[] = [];
     for (const entry of [...(this.#listeners.get(name) ?? [])]) {
       if (this.#getPluginState(entry.pluginId) !== 'active') {

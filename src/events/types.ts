@@ -3,9 +3,20 @@ export type EventMapShape<T> = {
 };
 
 export interface EventAPI<T> {
-  on<K extends keyof T & string>(
+  on<
+    K extends keyof T & string,
+    H extends (payload: T[K]) => void,
+  >(
     name: K,
-    listener: (payload: T[K]) => void,
+    listener: H & (
+      Extract<ReturnType<H>, PromiseLike<unknown>> extends never
+        ? unknown
+        : never
+    ),
   ): () => void;
+  emit<K extends keyof T & string>(name: K, payload: T[K]): void;
+}
+
+export interface EventEmitter<T> {
   emit<K extends keyof T & string>(name: K, payload: T[K]): void;
 }

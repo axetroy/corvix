@@ -45,6 +45,27 @@ describe('typed Event API', () => {
     expect(() => emit('/tmp/b')).toThrow();
   });
 
+  it('allows the host to emit typed events while the app is running', async () => {
+    const paths: string[] = [];
+    const app = new CorvixApplication<
+      AppEvents,
+      Record<never, never>,
+      Record<never, never>
+    >({ apiVersion: '0.1.0' });
+    app.register(plugin('observer', (context) => {
+      context.events.on('file:saved', ({ path }) => { paths.push(path); });
+    }));
+
+    expect(() => app.events.emit('file:saved', {
+      path: '/tmp/before',
+      hash: 'abc',
+    })).toThrow(/unavailable while stopped/);
+    await app.start();
+    app.events.emit('file:saved', { path: '/tmp/host', hash: 'def' });
+    expect(paths).toEqual(['/tmp/host']);
+    await app.stop();
+  });
+
   it('continues dispatch after failures and reports each owning plugin', async () => {
     const calls: string[] = [];
     let emit!: () => void;

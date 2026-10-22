@@ -75,7 +75,7 @@ const app = new CorvixApplication<AppEvents, AppHooks, AppServices>({
 });
 ```
 
-Within `setup(context)`, use `context.hooks.tap(...)`, `context.events.on(...)` / `emit(...)`, and `context.services.register(...)` / `get(...)` / `tryGet(...)`. Waterfall hooks take an initial value in `run`; bail handlers return `{ type: 'continue' }` or `{ type: 'bail', value }`.
+Within `setup(context)`, use `context.hooks.tap(...)`, `context.events.on(...)` / `emit(...)`, and `context.services.register(...)` / `get(...)` / `tryGet(...)`. The host invokes hooks with `app.hooks.run(...)` and publishes events with `app.events.emit(...)`; both are available while the app is running. Waterfall hooks take an initial value in `run`; bail handlers return `{ type: 'continue' }` or `{ type: 'bail', value }`.
 
 If startup fails, `app.start()` can be called again to retry the full startup. `app.retryPlugin(id)` retries one failed plugin and its dependencies, then resumes startup; the application enters the running state only if all plugins activate successfully.
 

@@ -91,6 +91,10 @@ export class HookRegistry<T> {
     } as HookAPI<T>;
   }
 
+  runFromHost(name: string, args: unknown, initial?: unknown): unknown {
+    return this.#run(name, args, initial);
+  }
+
   #tap(
     pluginId: string,
     name: string,
@@ -143,7 +147,12 @@ export class HookRegistry<T> {
         entries.splice(index, 1);
       }
     };
-    disposables.add(dispose);
+    try {
+      disposables.add(dispose);
+    } catch (error) {
+      dispose();
+      throw error;
+    }
     return dispose;
   }
 
@@ -338,12 +347,19 @@ export class HookRegistry<T> {
   }
 
   #isBailResult(value: unknown): value is BailResult<unknown> {
-    return (
-      typeof value === 'object'
-      && value !== null
-      && 'type' in value
-      && ((value as { type: unknown }).type === 'continue'
-        || (value as { type: unknown }).type === 'bail')
-    );
+    try {
+      return (
+        typeof value === 'object'
+        && value !== null
+        && 'type' in value
+        && ((value as { type: unknown }).type === 'continue'
+          || (
+            (value as { type: unknown }).type === 'bail'
+            && 'value' in value
+          ))
+      );
+    } catch {
+      return false;
+    }
   }
 }

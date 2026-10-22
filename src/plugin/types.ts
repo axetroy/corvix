@@ -51,13 +51,14 @@ export type PluginState =
   | 'inactive'
   | 'failed';
 
-export interface CorvixApplicationOptions<
+export type CorvixApplicationOptions<
   THooks = Record<never, never>,
-> {
+> = {
   readonly apiVersion: string;
   readonly logger?: Logger;
-  readonly hooks?: HookRuntimeConfiguration<THooks>;
-}
+} & (keyof THooks extends never
+  ? { readonly hooks?: HookRuntimeConfiguration<THooks> }
+  : { readonly hooks: HookRuntimeConfiguration<THooks> });
 
 export type {
   EventMapShape,

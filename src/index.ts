@@ -32,13 +32,14 @@ export type {
   HookMapShape,
   HookMode,
   HookRegistrationOptions,
+  HookRunner,
   HookResult,
   HookRuntimeConfiguration,
   HookRunArguments,
   HookRunReturn,
   HookStrategy,
 } from './hooks/types.js';
-export type { EventAPI, EventMapShape } from './events/types.js';
+export type { EventAPI, EventEmitter, EventMapShape } from './events/types.js';
 export type { ServiceAPI, ServiceMapShape } from './services/types.js';
 export type {
   CorvixApplicationOptions,

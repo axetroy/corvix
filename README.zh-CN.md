@@ -73,7 +73,7 @@ const app = new CorvixApplication<AppEvents, AppHooks, AppServices>({
 });
 ```
 
-在 `setup(context)` 中使用 `context.hooks.tap(...)`、`context.events.on(...)` / `emit(...)` 和 `context.services.register(...)` / `get(...)` / `tryGet(...)`。Waterfall Hook 的 `run` 需要初始值；Bail handler 返回 `{ type: 'continue' }` 或 `{ type: 'bail', value }`。
+在 `setup(context)` 中使用 `context.hooks.tap(...)`、`context.events.on(...)` / `emit(...)` 和 `context.services.register(...)` / `get(...)` / `tryGet(...)`。宿主可通过 `app.hooks.run(...)` 调用 Hook，并通过 `app.events.emit(...)` 发布事件；这两个入口仅在应用运行时可用。Waterfall Hook 的 `run` 需要初始值；Bail handler 返回 `{ type: 'continue' }` 或 `{ type: 'bail', value }`。
 
 启动失败后可再次调用 `app.start()` 重试全部插件。`app.retryPlugin(id)` 会重试指定失败插件及其依赖，再继续应用启动；只有全部插件激活成功后，应用才进入运行状态。
 

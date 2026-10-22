@@ -14,6 +14,11 @@ interface Hooks {
     mode: 'AsyncSeries';
     strategy: 'bail';
   };
+  'task:notify': {
+    args: { taskId: string };
+    mode: 'Sync';
+    strategy: 'series';
+  };
 }
 
 interface Services {
@@ -22,12 +27,16 @@ interface Services {
 
 const hooks = {
   'workspace:open': { mode: 'AsyncSeries', strategy: 'bail' },
+  'task:notify': { mode: 'Sync', strategy: 'series' },
 } satisfies HookRuntimeConfiguration<Hooks>;
 
 const app = new CorvixApplication<Events, Hooks, Services>({
   apiVersion: '0.1.0',
   hooks,
 });
+
+// @ts-expect-error Hook contracts require runtime mode/strategy configuration
+new CorvixApplication<Events, Hooks, Services>({ apiVersion: '0.1.0' });
 app.register({
   manifest: {
     id: 'typed.plugin',
@@ -42,10 +51,23 @@ app.register({
       void hash;
     });
     context.events.emit('file:saved', { path: '/tmp/a', hash: 'abc' });
+
+    // @ts-expect-error Event listeners must be synchronous
+    context.events.on('file:saved', async () => {});
+    const maybeAsyncListener = (): void | Promise<void> => {};
+    // @ts-expect-error Potentially async listeners are not supported
+    context.events.on('file:saved', maybeAsyncListener);
+
     context.hooks.tap('workspace:open', ({ workspaceId }) => ({
       type: 'bail',
       value: { allowed: workspaceId.length > 0 },
     }));
+
+    // @ts-expect-error Sync hook handlers cannot return a Promise
+    context.hooks.tap('task:notify', async () => {});
+    const maybeAsyncHook = (): void | Promise<void> => {};
+    // @ts-expect-error Potentially async Sync hook handlers are not supported
+    context.hooks.tap('task:notify', maybeAsyncHook);
     const file = context.services.get('file');
     void file.read('/tmp/a');
 

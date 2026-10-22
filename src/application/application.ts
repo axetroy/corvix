@@ -5,7 +5,9 @@ import { EventBus } from '../events/event-bus.js';
 import { HookRegistry } from '../hooks/hook-registry.js';
 import { ServiceRegistry } from '../services/service-registry.js';
 import type { EventMapShape } from '../events/types.js';
+import type { EventEmitter } from '../events/types.js';
 import type { HookMapShape } from '../hooks/types.js';
+import type { HookRunReturn, HookRunner } from '../hooks/types.js';
 import type { ServiceMapShape } from '../services/types.js';
 import type {
   CorvixApplicationOptions,
@@ -21,6 +23,8 @@ export class CorvixApplication<
   TServices extends ServiceMapShape<TServices> = Record<never, never>,
 > {
   readonly #pluginManager: PluginManager<TEvents, THooks, TServices>;
+  readonly #hookRegistry: HookRegistry<THooks>;
+  readonly #eventBus: EventBus<TEvents>;
   #state: ApplicationState = 'stopped';
   #queue: Promise<void> = Promise.resolve();
   #startPromise: Promise<void> | undefined;
@@ -51,10 +55,43 @@ export class CorvixApplication<
     });
     managerRef.current = pluginManager;
     this.#pluginManager = pluginManager;
+    this.#hookRegistry = hookRegistry;
+    this.#eventBus = eventBus;
   }
 
   get state(): ApplicationState {
     return this.#state;
+  }
+
+  get hooks(): HookRunner<THooks> {
+    return {
+      run: (name, ...args) => {
+        if (this.#state !== 'running') {
+          throw new PluginRegistrationError(
+            `Application hooks are unavailable while ${this.#state}`,
+          );
+        }
+        const [input, initial] = args as [unknown, unknown?];
+        return this.#hookRegistry.runFromHost(
+          name,
+          input,
+          initial,
+        ) as HookRunReturn<THooks[typeof name]>;
+      },
+    } as HookRunner<THooks>;
+  }
+
+  get events(): EventEmitter<TEvents> {
+    return {
+      emit: (name, payload) => {
+        if (this.#state !== 'running') {
+          throw new PluginRegistrationError(
+            `Application events are unavailable while ${this.#state}`,
+          );
+        }
+        this.#eventBus.emitFromHost(name, payload);
+      },
+    };
   }
 
   register(plugin: PluginDefinition<TEvents, THooks, TServices>): void {

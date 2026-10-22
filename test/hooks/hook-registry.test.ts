@@ -5,6 +5,7 @@ import {
   HookRegistrationError,
 } from '../../src/index.js';
 import type {
+  HookHandler,
   HookRuntimeConfiguration,
   PluginDefinition,
 } from '../../src/index.js';
@@ -52,7 +53,7 @@ function plugin(
 }
 
 describe('typed Hook API', () => {
-  it('runs synchronous handlers by priority and stable registration order', async () => {
+  it('respects before constraints, then priority and stable registration order', async () => {
     const calls: string[] = [];
     let run!: (taskId: string) => void;
     const app = new CorvixApplication<Record<never, never>, AppHooks, Record<never, never>>({
@@ -80,6 +81,49 @@ describe('typed Hook API', () => {
     run('task-1');
     expect(calls).toEqual(['after', 'priority', 'first']);
     await app.stop();
+  });
+
+  it('rejects Promise-returning Sync handlers at runtime', async () => {
+    let run!: () => void;
+    const app = new CorvixApplication<
+      Record<never, never>,
+      AppHooks,
+      Record<never, never>
+    >({ apiVersion: '0.1.0', hooks });
+    app.register(plugin('sync-plugin', (context) => {
+      run = () => context.hooks.run('task:notify', { taskId: 'x' });
+      context.hooks.tap(
+        'task:notify',
+        (() => Promise.resolve()) as unknown as HookHandler<AppHooks['task:notify']>,
+      );
+    }));
+
+    await app.start();
+    expect(run).toThrow(HookExecutionError);
+    await app.stop();
+  });
+
+  it('allows the host to invoke hooks only while the application is running', async () => {
+    const calls: string[] = [];
+    const app = new CorvixApplication<
+      Record<never, never>,
+      AppHooks,
+      Record<never, never>
+    >({ apiVersion: '0.1.0', hooks });
+    app.register(plugin('listener', (context) => {
+      context.hooks.tap('task:notify', ({ taskId }) => { calls.push(taskId); });
+    }));
+
+    expect(() => app.hooks.run('task:notify', { taskId: 'before' })).toThrow(
+      /unavailable while stopped/,
+    );
+    await app.start();
+    app.hooks.run('task:notify', { taskId: 'from-host' });
+    expect(calls).toEqual(['from-host']);
+    await app.stop();
+    expect(() => app.hooks.run('task:notify', { taskId: 'after' })).toThrow(
+      /unavailable while stopped/,
+    );
   });
 
   it('supports waterfall transformation and explicit bail outcomes', async () => {
