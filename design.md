@@ -261,13 +261,11 @@ Plugin Manager 管理插件的注册和生命周期。
 - 管理插件停用和资源清理。
 - 隔离插件生命周期错误。
 
-建议生命周期：
+建议将插件生命周期状态定义为：
 
-`discovered → registered → resolving → activating → active → deactivating → inactive`
+`registered → resolving → activating → active → deactivating → inactive`
 
-失败状态为 `failed`。
-
-其中，`discovered` 可由宿主负责，也可以由可选的发现适配器提供；核心运行时至少应支持显式注册插件。
+上述状态之外，失败时进入 `failed`。插件发现属于宿主或可选发现适配器的职责，不属于核心运行时必须管理的状态；核心运行时至少应支持显式注册插件。
 
 ### 4.3 Hook Registry
 
@@ -363,10 +361,13 @@ DisposableCollection 应支持：
 interface PluginDefinition {
   manifest: PluginManifest;
   setup(context: PluginContext): void | Promise<void>;
+  deactivate?(context: PluginContext): void | Promise<void>;
 }
 ```
 
-`PluginManifest` 描述插件的身份、版本、依赖和能力声明。
+`setup()` 用于注册资源并完成激活；`deactivate()` 用于执行停用前的业务清理。无论 `deactivate()` 是否存在或是否成功，框架都应继续释放由 `PluginContext` 管理的资源。
+
+`PluginManifest` 描述插件的身份、版本、依赖和能力声明。依赖版本应使用明确的版本范围；具体采用的格式由正式 API 决定。
 
 ```ts
 interface PluginManifest {
@@ -379,7 +380,7 @@ interface PluginManifest {
 }
 ```
 
-实际实现可根据类型约束进一步细化版本格式、依赖范围及能力标识。
+实现应校验插件 ID、版本和依赖声明，并明确 API 版本的兼容规则。能力标识也应由宿主或契约统一定义，避免插件自行使用含义不一致的字符串。
 
 ### 5.2 激活过程
 
@@ -402,14 +403,13 @@ interface PluginManifest {
 
 1. 阻止新的、由该插件发起的受控操作。
 2. 根据依赖关系确定停用顺序。
-3. 执行插件定义的停用逻辑（如果提供）。
-4. 清理 Hook、Event、Service 等注册。
-5. 释放其他资源。
-6. 更新插件状态。
+3. 执行插件定义的 `deactivate()`（如果提供）。
+4. 清理 Hook、Event、Service 等注册及其他托管资源。
+5. 更新插件状态。
 
 停用顺序通常应与激活顺序相反，以降低依赖失效风险。
 
-第一版不要求支持任意插件的无缝热卸载，但必须确保正常关闭和激活失败后的资源清理可预测。
+若 `deactivate()` 或某项清理操作失败，框架仍应尝试释放其余资源，并汇总停用错误。第一版不要求支持任意插件的无缝热卸载，但正常关闭和激活失败后的资源清理必须可预测。
 
 ---
 
@@ -592,7 +592,7 @@ ctx.events.emit("file:saved", {
 
 TypeScript 类型只在编译期提供约束，不能验证运行时传入的任意数据。
 
-对于来自网络、IPC、配置文件或其他不可信来源的数据，应使用运行时 Schema 验证，例如 Zod。
+对于来自网络、IPC、配置文件或其他外部边界的数据，应在进入运行时前使用 Schema 等机制进行验证，例如 Zod。
 
 事件总线还应明确：
 
@@ -602,7 +602,7 @@ TypeScript 类型只在编译期提供约束，不能验证运行时传入的任
 - 是否允许重复注册。
 - 监听器清理是否幂等。
 
-第一版建议优先提供可预测的同步事件分发。若需要异步事件，应提供独立且语义明确的 API，而不是隐式混合同步和异步行为。
+第一版建议按注册顺序同步派发事件。单个监听器抛出异常时，应记录错误并继续通知其他监听器，避免一个插件阻断其他订阅者；派发完成后再将错误交给宿主统一处理。若支持异步事件，应提供独立且语义明确的 API，不要隐式混合同步和异步行为。
 
 ---
 
@@ -673,7 +673,7 @@ services.register("file", fileServiceImplementation);
 - 调用不存在或已撤销的服务时，返回明确错误。
 - 插件依赖其他插件的服务时，应在激活前检查依赖是否满足。
 
-第一版不需要实现完整的依赖注入容器。服务注册和获取足以满足核心需求。
+必需依赖应在激活前校验；可选依赖缺失时，插件应能明确判断服务是否可用。第一版不需要实现完整的依赖注入容器，受控的服务注册和获取即可满足核心需求。
 
 ---
 
@@ -892,14 +892,12 @@ corvix/
 
 ## 15. TypeScript 严格模式
 
-建议启用以下编译选项：
+建议启用以下严格编译选项：
 
 ```json
 {
   "compilerOptions": {
     "strict": true,
-    "noImplicitAny": true,
-    "strictNullChecks": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
     "noEmit": true
@@ -907,7 +905,7 @@ corvix/
 }
 ```
 
-构建输出应由实际使用的构建工具负责，因此 `noEmit` 是否启用，需要根据最终构建方案确定。
+`noImplicitAny` 和 `strictNullChecks` 已包含在 `strict` 中，无需重复配置。构建输出由实际使用的构建工具负责，因此是否启用 `noEmit` 应根据最终构建方案确定。
 
 ### 15.1 类型测试
 
@@ -996,8 +994,9 @@ corvix/
 - PluginContext。
 - Plugin Manager 的基础生命周期。
 - Disposable。
+- 插件激活失败时的基础资源回滚。
 
-验收标准：能够注册插件、激活插件、停止插件，并确保资源正确清理。
+验收标准：能够显式注册、激活和停用插件；插件激活失败或应用停止时，已托管资源均能得到清理。
 
 ### Phase 2：类型安全通信
 
@@ -1018,11 +1017,10 @@ corvix/
 - 插件依赖解析。
 - 启动顺序。
 - 循环依赖检测。
-- 激活失败回滚。
-- 统一错误类型。
+- 依赖相关错误及统一错误类型。
 - 日志接口。
 
-验收标准：依赖缺失、依赖循环和激活失败都有明确的错误及可预测的清理行为。
+验收标准：依赖缺失和依赖循环均能产生明确错误；插件生命周期错误具有统一上下文，资源清理行为可预测。
 
 ### Phase 4：宿主适配
 
