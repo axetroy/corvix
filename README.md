@@ -86,6 +86,9 @@ Startup failures reject with `ApplicationStartError`, preserving the original fa
 Host capabilities and validated runtime configuration are available to plugins through `context.host`. Pass a `configurationSchema` to validate the host configuration at application construction. For untrusted event payloads, register an `eventSchemas` entry and use `app.events.emitExternal(...)`; this boundary validates the payload before dispatch. The typed `app.events.emit(...)` API remains available for trusted, already typed host code. Contract failures throw `ContractValidationError`.
 
 See [`examples/minimal-host.ts`](./examples/minimal-host.ts) for a complete host integration example.
+Run the standalone JavaScript version with `npm run example` after installing dependencies.
+
+See the [API reference](./API.md) for the public API and version compatibility policy.
 
 See [`design.md`](./design.md) for the architecture, lifecycle guarantees, and implementation phases.
 

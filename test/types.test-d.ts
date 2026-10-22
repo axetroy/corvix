@@ -25,6 +25,14 @@ interface Services {
   file: { read(path: string): Promise<string> };
 }
 
+interface HostCapabilities {
+  log(message: string): void;
+}
+
+interface RuntimeConfiguration {
+  region: string;
+}
+
 const hooks = {
   'workspace:open': { mode: 'AsyncSeries', strategy: 'bail' },
   'task:notify': { mode: 'Sync', strategy: 'series' },
@@ -93,6 +101,47 @@ app.register({
     context.services.register('file', { read: async () => 1 });
   },
 });
+
+const hostApp = new CorvixApplication<
+  Events,
+  Record<never, never>,
+  Record<never, never>,
+  HostCapabilities,
+  RuntimeConfiguration
+>({
+  apiVersion: '0.1.0',
+  host: {
+    capabilities: { log: (message) => { void message; } },
+    configuration: { region: 'test' },
+    configurationSchema: {
+      parse: (input) => input as RuntimeConfiguration,
+    },
+    eventSchemas: {
+      'file:saved': {
+        parse: (input) => input as Events['file:saved'],
+      },
+    },
+  },
+});
+hostApp.register({
+  manifest: {
+    id: 'typed.host-plugin',
+    version: '1.0.0',
+    apiVersion: '^0.1.0',
+  },
+  setup(context) {
+    const region: string = context.host.configuration.region;
+    context.host.capabilities.log(region);
+
+    // @ts-expect-error Host configuration is readonly
+    context.host.configuration.region = 'changed';
+    // @ts-expect-error Unknown host capability
+    context.host.capabilities.openFile('/tmp/a');
+  },
+});
+hostApp.events.emitExternal('file:saved', { path: '/tmp/a' });
+// @ts-expect-error Unknown external event
+hostApp.events.emitExternal('file:deleted', {});
 
 // @ts-expect-error API version must be a string
 new CorvixApplication({ apiVersion: 1 });

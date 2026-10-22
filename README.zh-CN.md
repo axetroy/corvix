@@ -84,6 +84,9 @@ const app = new CorvixApplication<AppEvents, AppHooks, AppServices>({
 插件可通过 `context.host` 访问宿主能力和已验证的运行时配置。创建应用时传入 `configurationSchema`，即可在配置进入运行时前验证它。对于不可信的外部事件负载，注册对应的 `eventSchemas` 并使用 `app.events.emitExternal(...)`；该入口会在派发前验证负载。对于可信且类型已知的宿主代码，仍可使用类型化的 `app.events.emit(...)`。契约验证失败时会抛出 `ContractValidationError`。
 
 完整的宿主集成示例参见 [`examples/minimal-host.ts`](./examples/minimal-host.ts)。
+安装依赖后运行 `npm run example`，即可执行独立 JavaScript 版本。
+
+公共 API 和版本兼容性约定参见 [API 参考](./API.zh-CN.md)。
 
 完整架构与生命周期约定参见 [`design.md`](./design.md)。
 

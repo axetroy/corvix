@@ -4,7 +4,7 @@
 **发音：** /ˈkɔːrvɪks/  
 **英文定位：** A Type-Safe, Hook-Driven Plugin Runtime  
 **文档版本：** 0.3.0-draft  
-**状态：** Phase 1 核心运行时、Phase 2 类型安全通信、Phase 3 错误处理/服务协作与 Phase 4 宿主适配已实现
+**状态：** Phase 1–5 已实现：核心运行时、类型安全通信、错误处理/服务协作、宿主适配与 API 稳定化
 **适用语言：** TypeScript  
 **核心原则：** 平台无关、类型安全、Hook 驱动、插件解耦、生命周期可管理
 
