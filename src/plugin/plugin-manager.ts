@@ -13,25 +13,51 @@ import type { HookRegistry } from '../hooks/hook-registry.js';
 import type { ServiceRegistry } from '../services/service-registry.js';
 import type { Logger } from '../logging/logger.js';
 import type {
+  HostRuntime,
   PluginContext,
   PluginDefinition,
   PluginManifest,
   PluginState,
 } from './types.js';
 
-interface RegisteredPlugin<TEvents, THooks, TServices> {
-  readonly definition: PluginDefinition<TEvents, THooks, TServices>;
+interface RegisteredPlugin<
+  TEvents,
+  THooks,
+  TServices,
+  THostCapabilities extends object,
+  TConfiguration,
+> {
+  readonly definition: PluginDefinition<
+    TEvents,
+    THooks,
+    TServices,
+    THostCapabilities,
+    TConfiguration
+  >;
   readonly manifest: PluginManifest;
   state: PluginState;
-  context: PluginContext<TEvents, THooks, TServices> | undefined;
+  context: PluginContext<
+    TEvents,
+    THooks,
+    TServices,
+    THostCapabilities,
+    TConfiguration
+  > | undefined;
 }
 
-interface PluginManagerOptions<TEvents, THooks, TServices> {
+interface PluginManagerOptions<
+  TEvents,
+  THooks,
+  TServices,
+  THostCapabilities extends object,
+  TConfiguration,
+> {
   readonly apiVersion: string;
   readonly logger?: Logger;
   readonly hooks: HookRegistry<THooks>;
   readonly events: EventBus<TEvents>;
   readonly services: ServiceRegistry<TServices>;
+  readonly host: HostRuntime<THostCapabilities, TConfiguration>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -158,6 +184,8 @@ export class PluginManager<
   TEvents = Record<never, never>,
   THooks = Record<never, never>,
   TServices = Record<never, never>,
+  THostCapabilities extends object = Record<never, never>,
+  TConfiguration = Record<never, never>,
 > {
   readonly #apiVersion: string;
   readonly #logger: Logger;
@@ -166,11 +194,26 @@ export class PluginManager<
   readonly #services: ServiceRegistry<TServices>;
   readonly #plugins = new Map<
     string,
-    RegisteredPlugin<TEvents, THooks, TServices>
+    RegisteredPlugin<
+      TEvents,
+      THooks,
+      TServices,
+      THostCapabilities,
+      TConfiguration
+    >
   >();
+  readonly #host: HostRuntime<THostCapabilities, TConfiguration>;
   readonly #activationOrder: string[] = [];
 
-  constructor(options: PluginManagerOptions<TEvents, THooks, TServices>) {
+  constructor(
+    options: PluginManagerOptions<
+      TEvents,
+      THooks,
+      TServices,
+      THostCapabilities,
+      TConfiguration
+    >,
+  ) {
     if (typeof options.apiVersion !== 'string' || valid(options.apiVersion) === null) {
       throw new PluginRegistrationError(
         'Application API version must be a valid SemVer version',
@@ -182,13 +225,22 @@ export class PluginManager<
     this.#hooks = options.hooks;
     this.#events = options.events;
     this.#services = options.services;
+    this.#host = options.host;
   }
 
   get hasActivePlugins(): boolean {
     return [...this.#plugins.values()].some((plugin) => plugin.state === 'active');
   }
 
-  register(definition: PluginDefinition<TEvents, THooks, TServices>): void {
+  register(
+    definition: PluginDefinition<
+      TEvents,
+      THooks,
+      TServices,
+      THostCapabilities,
+      TConfiguration
+    >,
+  ): void {
     if (this.hasActivePlugins) {
       throw new PluginRegistrationError(
         'Plugins cannot be registered while another plugin is active',
@@ -299,7 +351,13 @@ export class PluginManager<
       throw error;
     }
 
-    const activated: RegisteredPlugin<TEvents, THooks, TServices>[] = [];
+    const activated: RegisteredPlugin<
+      TEvents,
+      THooks,
+      TServices,
+      THostCapabilities,
+      TConfiguration
+    >[] = [];
     try {
       for (const pluginId of order) {
         const plugin = this.#plugins.get(pluginId);
@@ -412,10 +470,22 @@ export class PluginManager<
   }
 
   async #activate(
-    plugin: RegisteredPlugin<TEvents, THooks, TServices>,
+    plugin: RegisteredPlugin<
+      TEvents,
+      THooks,
+      TServices,
+      THostCapabilities,
+      TConfiguration
+    >,
   ): Promise<void> {
     const disposables = new DisposableCollection();
-    const context: PluginContext<TEvents, THooks, TServices> = Object.freeze({
+    const context: PluginContext<
+      TEvents,
+      THooks,
+      TServices,
+      THostCapabilities,
+      TConfiguration
+    > = Object.freeze({
       pluginId: plugin.manifest.id,
       logger: this.#logger,
       disposables,
@@ -426,6 +496,7 @@ export class PluginManager<
         plugin.manifest,
         disposables,
       ),
+      host: this.#host,
     });
     plugin.state = 'activating';
     plugin.context = context;
@@ -457,7 +528,13 @@ export class PluginManager<
   }
 
   async #deactivate(
-    plugin: RegisteredPlugin<TEvents, THooks, TServices>,
+    plugin: RegisteredPlugin<
+      TEvents,
+      THooks,
+      TServices,
+      THostCapabilities,
+      TConfiguration
+    >,
   ): Promise<void> {
     plugin.state = 'deactivating';
     const errors: unknown[] = [];

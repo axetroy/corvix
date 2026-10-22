@@ -1,7 +1,15 @@
-import { EventDispatchError, EventRegistrationError } from '../errors.js';
+import {
+  ContractValidationError,
+  EventDispatchError,
+  EventRegistrationError,
+} from '../errors.js';
 import type { DisposableCollection } from '../lifecycle/disposable.js';
 import type { PluginState } from '../plugin/types.js';
 import type { EventAPI } from './types.js';
+import type {
+  ExternalEventSchemas,
+  RuntimeSchema,
+} from '../plugin/types.js';
 
 interface EventListenerEntry {
   readonly pluginId: string;
@@ -18,9 +26,16 @@ function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
 export class EventBus<T> {
   readonly #listeners = new Map<string, EventListenerEntry[]>();
   readonly #getPluginState: (pluginId: string) => PluginState | undefined;
+  readonly #schemas: ReadonlyMap<string, RuntimeSchema<unknown>>;
 
-  constructor(getPluginState: (pluginId: string) => PluginState | undefined) {
+  constructor(
+    getPluginState: (pluginId: string) => PluginState | undefined,
+    schemas?: ExternalEventSchemas<T>,
+  ) {
     this.#getPluginState = getPluginState;
+    this.#schemas = new Map(
+      Object.entries(schemas ?? {}) as [string, RuntimeSchema<unknown>][],
+    );
   }
 
   createAPI(pluginId: string, disposables: DisposableCollection): EventAPI<T> {
@@ -81,6 +96,24 @@ export class EventBus<T> {
 
   emitFromHost(name: string, payload: unknown): void {
     this.#emit(name, payload);
+  }
+
+  emitExternal(name: string, payload: unknown): void {
+    const schema = this.#schemas.get(name);
+    if (!schema) {
+      throw new ContractValidationError(
+        'event',
+        name,
+        new Error(`No runtime schema is registered for event "${name}"`),
+      );
+    }
+    let validated: unknown;
+    try {
+      validated = schema.parse(payload);
+    } catch (cause) {
+      throw new ContractValidationError('event', name, cause);
+    }
+    this.#emit(name, validated);
   }
 
   #emit(name: string, payload: unknown): void {

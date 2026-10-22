@@ -19,4 +19,5 @@ export interface EventAPI<T> {
 
 export interface EventEmitter<T> {
   emit<K extends keyof T & string>(name: K, payload: T[K]): void;
+  emitExternal<K extends keyof T & string>(name: K, payload: unknown): void;
 }

@@ -53,6 +53,21 @@ export class ApplicationStartError extends CorvixError {
   }
 }
 
+export class ContractValidationError extends CorvixError {
+  readonly contractName: string;
+  readonly source: 'configuration' | 'event';
+
+  constructor(
+    source: 'configuration' | 'event',
+    contractName: string,
+    cause: unknown,
+  ) {
+    super(`Invalid external ${source} data for "${contractName}"`, { cause });
+    this.source = source;
+    this.contractName = contractName;
+  }
+}
+
 export class HookRegistrationError extends CorvixError {}
 
 export class HookExecutionError extends CorvixError {

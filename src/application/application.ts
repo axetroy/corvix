@@ -1,5 +1,6 @@
 import {
   ApplicationStartError,
+  ContractValidationError,
   PluginActivationError,
   PluginRegistrationError,
 } from '../errors.js';
@@ -15,6 +16,8 @@ import type { HookRunReturn, HookRunner } from '../hooks/types.js';
 import type { ServiceMapShape } from '../services/types.js';
 import type {
   CorvixApplicationOptions,
+  ExternalEventSchemas,
+  HostRuntime,
   PluginDefinition,
   PluginState,
 } from '../plugin/types.js';
@@ -25,8 +28,16 @@ export class CorvixApplication<
   TEvents extends EventMapShape<TEvents> = Record<never, never>,
   THooks extends HookMapShape<THooks> = Record<never, never>,
   TServices extends ServiceMapShape<TServices> = Record<never, never>,
+  THostCapabilities extends object = Record<never, never>,
+  TConfiguration = Record<never, never>,
 > {
-  readonly #pluginManager: PluginManager<TEvents, THooks, TServices>;
+  readonly #pluginManager: PluginManager<
+    TEvents,
+    THooks,
+    TServices,
+    THostCapabilities,
+    TConfiguration
+  >;
   readonly #hookRegistry: HookRegistry<THooks>;
   readonly #eventBus: EventBus<TEvents>;
   #state: ApplicationState = 'stopped';
@@ -35,9 +46,22 @@ export class CorvixApplication<
   #stopPromise: Promise<void> | undefined;
   readonly #retryPromises = new Map<string, Promise<void>>();
 
-  constructor(options: CorvixApplicationOptions<THooks>) {
+  constructor(
+    options: CorvixApplicationOptions<
+      TEvents,
+      THooks,
+      THostCapabilities,
+      TConfiguration
+    >,
+  ) {
     const managerRef: {
-      current?: PluginManager<TEvents, THooks, TServices>;
+      current?: PluginManager<
+        TEvents,
+        THooks,
+        TServices,
+        THostCapabilities,
+        TConfiguration
+      >;
     } = {};
     const getPluginState = (pluginId: string) =>
       managerRef.current?.getState(pluginId);
@@ -45,17 +69,41 @@ export class CorvixApplication<
       options.hooks,
       getPluginState,
     );
-    const eventBus = new EventBus<TEvents>(getPluginState);
+    const eventBus = new EventBus<TEvents>(
+      getPluginState,
+      options.host?.eventSchemas as ExternalEventSchemas<TEvents> | undefined,
+    );
     const serviceRegistry = new ServiceRegistry<TServices>(
       getPluginState,
       (pluginId) => managerRef.current?.getPluginVersion(pluginId),
     );
+    let configuration = options.host?.configuration as
+      | TConfiguration
+      | undefined;
+    if (configuration === undefined) {
+      configuration = {} as TConfiguration;
+    } else if (options.host?.configurationSchema) {
+      try {
+        configuration = options.host.configurationSchema.parse(configuration);
+      } catch (cause) {
+        throw new ContractValidationError('configuration', 'runtime', cause);
+      }
+    }
+    const host: HostRuntime<THostCapabilities, TConfiguration> = Object.freeze({
+      capabilities: Object.freeze({
+        ...(options.host?.capabilities ?? {}),
+      }) as Readonly<THostCapabilities>,
+      configuration: Object.freeze({
+        ...(configuration as object),
+      }) as Readonly<TConfiguration>,
+    });
     const pluginManager = new PluginManager({
       apiVersion: options.apiVersion,
       logger: options.logger ?? noopLogger,
       hooks: hookRegistry,
       events: eventBus,
       services: serviceRegistry,
+      host,
     });
     managerRef.current = pluginManager;
     this.#pluginManager = pluginManager;
@@ -95,10 +143,26 @@ export class CorvixApplication<
         }
         this.#eventBus.emitFromHost(name, payload);
       },
+      emitExternal: (name, payload) => {
+        if (this.#state !== 'running') {
+          throw new PluginRegistrationError(
+            `Application events are unavailable while ${this.#state}`,
+          );
+        }
+        this.#eventBus.emitExternal(name, payload);
+      },
     };
   }
 
-  register(plugin: PluginDefinition<TEvents, THooks, TServices>): void {
+  register(
+    plugin: PluginDefinition<
+      TEvents,
+      THooks,
+      TServices,
+      THostCapabilities,
+      TConfiguration
+    >,
+  ): void {
     if (
       this.#state !== 'stopped'
       || this.#startPromise
