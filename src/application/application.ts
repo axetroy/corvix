@@ -24,6 +24,16 @@ import type {
 
 export type ApplicationState = 'stopped' | 'starting' | 'running' | 'stopping';
 
+function freezeSnapshot<T>(value: T): Readonly<T> {
+  if (Array.isArray(value)) {
+    return Object.freeze([...value]) as Readonly<T>;
+  }
+  if (typeof value === 'object' && value !== null) {
+    return Object.freeze({ ...value }) as Readonly<T>;
+  }
+  return value;
+}
+
 export class CorvixApplication<
   TEvents extends EventMapShape<TEvents> = Record<never, never>,
   THooks extends HookMapShape<THooks> = Record<never, never>,
@@ -90,12 +100,8 @@ export class CorvixApplication<
       }
     }
     const host: HostRuntime<THostCapabilities, TConfiguration> = Object.freeze({
-      capabilities: Object.freeze({
-        ...(options.host?.capabilities ?? {}),
-      }) as Readonly<THostCapabilities>,
-      configuration: Object.freeze({
-        ...(configuration as object),
-      }) as Readonly<TConfiguration>,
+      capabilities: freezeSnapshot(options.host?.capabilities ?? {}),
+      configuration: freezeSnapshot(configuration),
     });
     const pluginManager = new PluginManager({
       apiVersion: options.apiVersion,

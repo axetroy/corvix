@@ -2,6 +2,7 @@ export { CorvixApplication } from './application/application.js';
 export type { ApplicationState } from './application/application.js';
 export {
   ApplicationStartError,
+  ContractValidationError,
   DuplicateRegistrationError,
   EventDispatchError,
   EventRegistrationError,
@@ -44,8 +45,11 @@ export type { EventAPI, EventEmitter, EventMapShape } from './events/types.js';
 export type { ServiceAPI, ServiceMapShape } from './services/types.js';
 export type {
   CorvixApplicationOptions,
+  ExternalEventSchemas,
+  HostRuntime,
   PluginContext,
   PluginDefinition,
   PluginManifest,
   PluginState,
+  RuntimeSchema,
 } from './plugin/types.js';

@@ -2,7 +2,7 @@
 
 Corvix 是面向 TypeScript 应用的平台无关、类型安全插件运行时，提供显式插件注册、依赖管理、生命周期资源清理以及 Hook、Event 和 Service。
 
-当前实现包括应用与插件生命周期基础，以及类型安全的 Hook、Event 和 Service，详情参见 [`design.md`](./design.md)。
+当前实现包括应用与插件生命周期基础、类型安全的 Hook、Event、Service 及宿主集成，详情参见 [`design.md`](./design.md)。
 
 ## 环境要求
 
@@ -78,6 +78,12 @@ const app = new CorvixApplication<AppEvents, AppHooks, AppServices>({
 启动失败后可再次调用 `app.start()` 重试全部插件。`app.retryPlugin(id)` 会重试指定失败插件及其依赖，再继续应用启动；只有全部插件激活成功后，应用才进入运行状态。
 
 启动失败时会抛出 `ApplicationStartError`：原始错误保留在 `cause` 中，回滚错误记录在 `rollbackErrors` 中。插件激活或停用失败时，运行时会通过注入的 `Logger` 记录插件 ID 和生命周期阶段；Logger 自身抛出的错误不会遮蔽运行时错误。
+
+## 宿主集成
+
+插件可通过 `context.host` 访问宿主能力和已验证的运行时配置。创建应用时传入 `configurationSchema`，即可在配置进入运行时前验证它。对于不可信的外部事件负载，注册对应的 `eventSchemas` 并使用 `app.events.emitExternal(...)`；该入口会在派发前验证负载。对于可信且类型已知的宿主代码，仍可使用类型化的 `app.events.emit(...)`。契约验证失败时会抛出 `ContractValidationError`。
+
+完整的宿主集成示例参见 [`examples/minimal-host.ts`](./examples/minimal-host.ts)。
 
 完整架构与生命周期约定参见 [`design.md`](./design.md)。
 
