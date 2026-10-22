@@ -1,6 +1,12 @@
 import { PluginRegistrationError } from '../errors.js';
 import { noopLogger } from '../logging/logger.js';
 import { PluginManager } from '../plugin/plugin-manager.js';
+import { EventBus } from '../events/event-bus.js';
+import { HookRegistry } from '../hooks/hook-registry.js';
+import { ServiceRegistry } from '../services/service-registry.js';
+import type { EventMapShape } from '../events/types.js';
+import type { HookMapShape } from '../hooks/types.js';
+import type { ServiceMapShape } from '../services/types.js';
 import type {
   CorvixApplicationOptions,
   PluginDefinition,
@@ -9,26 +15,49 @@ import type {
 
 export type ApplicationState = 'stopped' | 'starting' | 'running' | 'stopping';
 
-export class CorvixApplication {
-  readonly #pluginManager: PluginManager;
+export class CorvixApplication<
+  TEvents extends EventMapShape<TEvents> = Record<never, never>,
+  THooks extends HookMapShape<THooks> = Record<never, never>,
+  TServices extends ServiceMapShape<TServices> = Record<never, never>,
+> {
+  readonly #pluginManager: PluginManager<TEvents, THooks, TServices>;
   #state: ApplicationState = 'stopped';
   #queue: Promise<void> = Promise.resolve();
   #startPromise: Promise<void> | undefined;
   #stopPromise: Promise<void> | undefined;
   readonly #retryPromises = new Map<string, Promise<void>>();
 
-  constructor(options: CorvixApplicationOptions) {
-    this.#pluginManager = new PluginManager({
+  constructor(options: CorvixApplicationOptions<THooks>) {
+    const managerRef: {
+      current?: PluginManager<TEvents, THooks, TServices>;
+    } = {};
+    const getPluginState = (pluginId: string) =>
+      managerRef.current?.getState(pluginId);
+    const hookRegistry = new HookRegistry<THooks>(
+      options.hooks,
+      getPluginState,
+    );
+    const eventBus = new EventBus<TEvents>(getPluginState);
+    const serviceRegistry = new ServiceRegistry<TServices>(
+      getPluginState,
+      (pluginId) => managerRef.current?.getPluginVersion(pluginId),
+    );
+    const pluginManager = new PluginManager({
       apiVersion: options.apiVersion,
       logger: options.logger ?? noopLogger,
+      hooks: hookRegistry,
+      events: eventBus,
+      services: serviceRegistry,
     });
+    managerRef.current = pluginManager;
+    this.#pluginManager = pluginManager;
   }
 
   get state(): ApplicationState {
     return this.#state;
   }
 
-  register(plugin: PluginDefinition): void {
+  register(plugin: PluginDefinition<TEvents, THooks, TServices>): void {
     if (
       this.#state !== 'stopped'
       || this.#startPromise

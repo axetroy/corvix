@@ -43,3 +43,47 @@ export class PluginDeactivationError extends CorvixError {
     this.errors = [...errors];
   }
 }
+
+export class HookRegistrationError extends CorvixError {}
+
+export class HookExecutionError extends CorvixError {
+  readonly hookName: string;
+  readonly pluginId: string;
+
+  constructor(hookName: string, pluginId: string, cause: unknown) {
+    super(`Handler for hook "${hookName}" failed in plugin "${pluginId}"`, { cause });
+    this.hookName = hookName;
+    this.pluginId = pluginId;
+  }
+}
+
+export class EventRegistrationError extends CorvixError {}
+
+export class EventDispatchError extends CorvixError {
+  readonly eventName: string;
+  readonly failures: readonly { pluginId: string; error: unknown }[];
+
+  constructor(
+    eventName: string,
+    failures: readonly { pluginId: string; error: unknown }[],
+  ) {
+    super(`One or more listeners for event "${eventName}" failed`, {
+      cause: failures[0]?.error,
+    });
+    this.eventName = eventName;
+    this.failures = [...failures];
+  }
+}
+
+export class ServiceRegistrationError extends CorvixError {}
+
+export class ServiceNotFoundError extends CorvixError {
+  readonly serviceName: string;
+
+  constructor(message: string, serviceName: string) {
+    super(message);
+    this.serviceName = serviceName;
+  }
+}
+
+export class DuplicateRegistrationError extends CorvixError {}
